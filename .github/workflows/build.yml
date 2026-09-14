@@ -3,6 +3,10 @@ name: build
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   linux-build:
@@ -15,3 +19,42 @@ jobs:
         run: cmake -S . -B build -DTS3_SDK_DIR=/tmp/ts3client-pluginsdk
       - name: Build
         run: cmake --build build --config Release --parallel
+      - name: Package Linux plugin
+        run: tar -czf PokeWave-linux-x64.tar.gz -C build pokewave.so
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PokeWave-linux-x64
+          path: PokeWave-linux-x64.tar.gz
+
+  windows-build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch TeamSpeak plugin SDK
+        shell: pwsh
+        run: git clone --depth=1 https://github.com/teamspeak/ts3client-pluginsdk.git "$env:RUNNER_TEMP\ts3client-pluginsdk"
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -A x64 "-DTS3_SDK_DIR=$env:RUNNER_TEMP\ts3client-pluginsdk"
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Verify Windows plugin binary
+        shell: pwsh
+        run: |
+          if (!(Test-Path "build\Release\pokewave.dll")) { throw "pokewave.dll was not produced" }
+          $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
+          if ($null -ne $dumpbin) {
+            & $dumpbin.Source /exports "build\Release\pokewave.dll" | Select-String "ts3plugin_"
+            if ($LASTEXITCODE -ne 0) { throw "plugin export inspection failed" }
+          } else {
+            Write-Host "dumpbin.exe is not on PATH; DLL existence was verified."
+          }
+      - name: Package Windows plugin
+        shell: pwsh
+        run: Compress-Archive -Path "build\Release\pokewave.dll", "README.md" -DestinationPath "PokeWave-windows-x64.zip"
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PokeWave-windows-x64
+          path: PokeWave-windows-x64.zip
