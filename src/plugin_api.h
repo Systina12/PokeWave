@@ -26,6 +26,7 @@ POKEWAVE_EXPORT void ts3plugin_shutdown();
 POKEWAVE_EXPORT int ts3plugin_offersConfigure();
 POKEWAVE_EXPORT void ts3plugin_configure(void* handle, void* qParentWidget);
 POKEWAVE_EXPORT void ts3plugin_registerPluginID(const char* id);
+POKEWAVE_EXPORT const char* ts3plugin_commandKeyword();
 POKEWAVE_EXPORT int ts3plugin_processCommand(uint64 serverConnectionHandlerID, const char* command);
 POKEWAVE_EXPORT void ts3plugin_currentServerConnectionChanged(uint64 serverConnectionHandlerID);
 POKEWAVE_EXPORT int ts3plugin_requestAutoload();
