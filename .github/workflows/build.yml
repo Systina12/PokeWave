@@ -63,6 +63,7 @@ jobs:
   runtime-smoke:
     needs: windows-build
     runs-on: windows-2022
+    timeout-minutes: 5
     steps:
       - name: Download Windows plugin artifact
         uses: actions/download-artifact@v4
@@ -94,6 +95,55 @@ jobs:
           "TS3CLIENT_EXE=$($client.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
           "TS3CLIENT_DIR=$($client.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
           Write-Host "Using TeamSpeak client: $($client.FullName)"
+      - name: Verify command keyword and GUI callback
+        shell: pwsh
+        run: |
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class PokeWaveNative {
+              [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              public static extern IntPtr LoadLibrary(string path);
+              [DllImport("kernel32.dll", CharSet = CharSet.Ansi, ExactSpelling = true)]
+              public static extern IntPtr GetProcAddress(IntPtr module, string name);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+              public static extern IntPtr FindWindow(string className, string windowName);
+              [DllImport("user32.dll")]
+              public static extern bool DestroyWindow(IntPtr window);
+              [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+              public delegate IntPtr KeywordDelegate();
+              [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+              public delegate int ProcessCommandDelegate(ulong schid, [MarshalAs(UnmanagedType.LPStr)] string command);
+              [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+              public delegate void MenuDelegate(ulong schid, int type, int menuItemId, ulong selectedItemId);
+              [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+              public delegate void ShutdownDelegate();
+          }
+          '@
+          function Get-PokeDelegate([IntPtr] $module, [string] $name, [Type] $type) {
+            $address = [PokeWaveNative]::GetProcAddress($module, $name)
+            if ($address -eq [IntPtr]::Zero) { throw "Missing export: $name" }
+            return [Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($address, $type)
+          }
+          $dll = (Resolve-Path "package\extracted\pokewave.dll").Path
+          $module = [PokeWaveNative]::LoadLibrary($dll)
+          if ($module -eq [IntPtr]::Zero) { throw "LoadLibrary failed for pokewave.dll" }
+          $keyword = Get-PokeDelegate $module "ts3plugin_commandKeyword" ([PokeWaveNative+KeywordDelegate])
+          $keywordText = [Runtime.InteropServices.Marshal]::PtrToStringAnsi($keyword.Invoke())
+          if ($keywordText -ne "pokewave") { throw "Unexpected command keyword: $keywordText" }
+          $processCommand = Get-PokeDelegate $module "ts3plugin_processCommand" ([PokeWaveNative+ProcessCommandDelegate])
+          if ($processCommand.Invoke([UInt64]0, "help") -ne 0) { throw "help command was not handled" }
+          $menu = Get-PokeDelegate $module "ts3plugin_onMenuItemEvent" ([PokeWaveNative+MenuDelegate])
+          $menu.Invoke([UInt64]0, 0, 1, [UInt64]0)
+          Start-Sleep -Milliseconds 500
+          $window = [PokeWaveNative]::FindWindow("PokeWaveGuiWindow", "PokeWave")
+          if ($window -eq [IntPtr]::Zero) { throw "PokeWave GUI window was not created by the menu callback" }
+          Write-Host "Command keyword and Win32 GUI callback verified."
+          [PokeWaveNative]::DestroyWindow($window) | Out-Null
+          $shutdown = Get-PokeDelegate $module "ts3plugin_shutdown" ([PokeWaveNative+ShutdownDelegate])
+          $shutdown.Invoke()
+          $module = [IntPtr]::Zero
+
       - name: Load plugin in TeamSpeak client
         shell: pwsh
         run: |
@@ -141,8 +191,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.3.0
-          name: PokeWave v0.3.0
+          tag_name: v0.3.1
+          name: PokeWave v0.3.1
           target_commitish: main
           generate_release_notes: true
           files: |
