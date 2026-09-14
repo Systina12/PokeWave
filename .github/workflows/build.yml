@@ -123,3 +123,28 @@ jobs:
           if (!$loaded) { throw "TeamSpeak started, but pokewave.dll was not observed in its loaded modules" }
           Write-Host "PokeWave DLL was loaded by TeamSpeak 3."
           Stop-Process -Id $client.Id -Force
+
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release PokeWave')
+    needs: [linux-build, windows-build, runtime-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: PokeWave-*
+          path: release-assets
+          merge-multiple: true
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.3.0
+          name: PokeWave v0.3.0
+          target_commitish: \${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            release-assets/PokeWave-windows-x64.zip
+            release-assets/PokeWave-linux-x64.tar.gz
