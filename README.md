@@ -20,10 +20,10 @@ PokeWave is a native TeamSpeak 3 client plugin for controlled poke testing on se
 
 ## Installation
 
-Current release: [v0.3.2](https://github.com/Systina12/PokeWave/releases/tag/v0.3.2)
+Current release: [v0.3.3](https://github.com/Systina12/PokeWave/releases/tag/v0.3.3)
 
 1. Exit TeamSpeak 3 completely.
-2. Download [PokeWave-windows-x64.zip](https://github.com/Systina12/PokeWave/releases/download/v0.3.2/PokeWave-windows-x64.zip).
+2. Download [PokeWave-windows-x64.zip](https://github.com/Systina12/PokeWave/releases/download/v0.3.3/PokeWave-windows-x64.zip).
 3. Extract `pokewave.dll`.
 4. Copy the DLL to:
 
