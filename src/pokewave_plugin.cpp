@@ -661,7 +661,7 @@ static void showGui(uint64 schid) {
 
 extern "C" {
 const char* ts3plugin_name() { return "PokeWave"; }
-const char* ts3plugin_version() { return "0.3.2"; }
+const char* ts3plugin_version() { return "0.3.3"; }
 int ts3plugin_apiVersion() { return kApiVersion; }
 const char* ts3plugin_author() { return "Local server administrator"; }
 const char* ts3plugin_description() { return "Controlled multi-target TeamSpeak poke test tool."; }
