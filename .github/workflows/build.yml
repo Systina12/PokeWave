@@ -1,0 +1,17 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch TeamSpeak plugin SDK
+        run: git clone --depth=1 https://github.com/teamspeak/ts3client-pluginsdk.git /tmp/ts3client-pluginsdk
+      - name: Configure
+        run: cmake -S . -B build -DTS3_SDK_DIR=/tmp/ts3client-pluginsdk
+      - name: Build
+        run: cmake --build build --config Release --parallel
