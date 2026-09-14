@@ -562,16 +562,35 @@ static void showGui(uint64 schid) {
 
 extern "C" {
 const char* ts3plugin_name() { return "PokeWave"; }
-const char* ts3plugin_version() { return "0.3.0"; }
+const char* ts3plugin_version() { return "0.3.1"; }
 int ts3plugin_apiVersion() { return kApiVersion; }
 const char* ts3plugin_author() { return "Local server administrator"; }
 const char* ts3plugin_description() { return "Controlled multi-target TeamSpeak poke test tool."; }
 void ts3plugin_setFunctionPointers(const struct TS3Functions funcs) { g_ts3 = funcs; }
 int ts3plugin_init() { logLine(0, LogLevel_INFO, "PokeWave loaded. No task starts automatically."); return 0; }
-void ts3plugin_shutdown() { g_controller.stop(); g_pluginId.clear(); }
-int ts3plugin_offersConfigure() { return PLUGIN_OFFERS_NO_CONFIGURE; }
-void ts3plugin_configure(void*, void*) { logLine(currentSchid(), LogLevel_INFO, "Use /pokewave help."); }
+void ts3plugin_shutdown() {
+    g_controller.stop();
+#ifdef _WIN32
+    if (g_guiWindow != nullptr && IsWindow(g_guiWindow) != FALSE) DestroyWindow(g_guiWindow);
+#endif
+    g_pluginId.clear();
+}
+int ts3plugin_offersConfigure() {
+#ifdef _WIN32
+    return PLUGIN_OFFERS_CONFIGURE_QT_THREAD;
+#else
+    return PLUGIN_OFFERS_NO_CONFIGURE;
+#endif
+}
+void ts3plugin_configure(void*, void*) {
+#ifdef _WIN32
+    showGui(currentSchid());
+#else
+    logLine(currentSchid(), LogLevel_INFO, "Use /pokewave help.");
+#endif
+}
 void ts3plugin_registerPluginID(const char* id) { g_pluginId = id == nullptr ? "" : id; }
+const char* ts3plugin_commandKeyword() { return "pokewave"; }
 int ts3plugin_requestAutoload() { return 1; }
 
 void ts3plugin_initMenus(struct PluginMenuItem*** menuItems, char** menuIcon) {
