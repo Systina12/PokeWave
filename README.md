@@ -6,29 +6,29 @@ TeamSpeak 3 原生客户端 Poke 测试插件，使用官方 Client Plugin SDK �
 
 ## 构建
 
-NaN
-NaN
-NaN
-NaN
-NaN
+```bash
+git clone --depth=1 https://github.com/teamspeak/ts3client-pluginsdk.git
+cmake -S . -B build -DTS3_SDK_DIR=/path/to/ts3client-pluginsdk
+cmake --build build --config Release
+```
 
-NaN
+`TS3_SDK_DIR` 必须指向包含 `include/ts3_functions.h` 的 SDK 根目录。
 
 ## 使用
 
-NaN
-NaN
-NaN
-NaN
-NaN
-NaN
-NaN
-NaN
-NaN
-NaN
-NaN
-NaN
-NaN
+```text
+/pokewave help
+/pokewave list
+/pokewave select 12,13,14
+/pokewave add 15
+/pokewave remove 13
+/pokewave speed 500
+/pokewave count 1000000
+/pokewave message controlled test
+/pokewave start
+/pokewave status
+/pokewave stop
+```
 
 `select` 替换多选列表，`add` 追加目标；client ID 来自 `list`。
 
