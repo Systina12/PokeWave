@@ -32,7 +32,7 @@ PokeWave 是一个 TeamSpeak 3 原生客户端插件，用于在你管理的服�
 4. 将 DLL 放入：
 
    ```text
-   %APPDATA%\\TS3Client\\plugins
+   %APPDATA%\TS3Client\plugins
    ```
 
 5. 确认机器上没有其他旧版 `pokewave.dll`，然后启动 TeamSpeak 3。
@@ -128,7 +128,7 @@ Current release: [v0.3.2](https://github.com/Systina12/PokeWave/releases/tag/v0.
 4. Copy the DLL to:
 
    ```text
-   %APPDATA%\\TS3Client\\plugins
+   %APPDATA%\TS3Client\plugins
    ```
 
 5. Make sure no older duplicate `pokewave.dll` is being loaded, then start TeamSpeak 3.
