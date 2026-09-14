@@ -19,6 +19,14 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <commctrl.h>
+#endif
+
 namespace {
 constexpr int kApiVersion = 26;
 constexpr std::size_t kMaxMessageBytes = 256;
@@ -288,11 +296,273 @@ static void help(uint64 schid) {
             "PokeWave: list | select <id,...> | add <id,...> | remove <id,...> | "
             "speed <positive> | count <positive uint64> | message <text> | start | stop | status");
 }
+
+#ifdef _WIN32
+enum GuiId {
+    kGuiList = 2001, kGuiRate = 2002, kGuiCount = 2003, kGuiMessage = 2004,
+    kGuiRefresh = 2010, kGuiStart = 2011, kGuiStop = 2012, kGuiStatus = 2020
+};
+static HWND g_guiWindow = nullptr;
+static HWND g_guiList = nullptr;
+static HWND g_guiRate = nullptr;
+static HWND g_guiCount = nullptr;
+static HWND g_guiMessage = nullptr;
+static HWND g_guiStatus = nullptr;
+static uint64 g_guiSchid = 0;
+static bool g_guiUpdating = false;
+
+static std::wstring guiW(const std::string& value) {
+    if (value.empty()) return {};
+    const int n = static_cast<int>(value.size());
+    int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), n, nullptr, 0);
+    if (size == 0) size = MultiByteToWideChar(CP_UTF8, 0, value.data(), n, nullptr, 0);
+    if (size == 0) return {};
+    std::wstring result(static_cast<std::size_t>(size), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, value.data(), n, result.data(), size);
+    return result;
+}
+static std::string guiU(const std::wstring& value) {
+    if (value.empty()) return {};
+    const int n = static_cast<int>(value.size());
+    int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), n, nullptr, 0, nullptr, nullptr);
+    if (size == 0) size = WideCharToMultiByte(CP_UTF8, 0, value.data(), n, nullptr, 0, nullptr, nullptr);
+    if (size == 0) return {};
+    std::string result(static_cast<std::size_t>(size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.data(), n, result.data(), size, nullptr, nullptr);
+    return result;
+}
+static std::wstring guiText(HWND control) {
+    if (control == nullptr) return {};
+    const int n = GetWindowTextLengthW(control);
+    std::wstring result(static_cast<std::size_t>(n) + 1, L'\0');
+    GetWindowTextW(control, result.data(), n + 1);
+    result.resize(static_cast<std::size_t>(n));
+    return result;
+}
+static void guiFont(HWND control) {
+    if (control != nullptr) SendMessageW(control, WM_SETFONT,
+        reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+}
+static HWND guiControl(HWND parent, const wchar_t* cls, const wchar_t* text, DWORD style,
+                       int x, int y, int w, int h, int id) {
+    HWND control = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
+        x, y, w, h, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
+        GetModuleHandleW(nullptr), nullptr);
+    guiFont(control);
+    return control;
+}
+static bool guiSelected(anyID id) {
+    std::lock_guard<std::mutex> lock(g_configMutex);
+    return std::find(g_config.selected.begin(), g_config.selected.end(), id) != g_config.selected.end();
+}
+static void guiReadSelection() {
+    if (g_guiList == nullptr || g_guiUpdating) return;
+    std::vector<anyID> selected;
+    for (int i = 0, n = ListView_GetItemCount(g_guiList); i < n; ++i) {
+        if (!ListView_GetCheckState(g_guiList, i)) continue;
+        LVITEMW item{};
+        item.mask = LVIF_PARAM;
+        item.iItem = i;
+        if (ListView_GetItemW(g_guiList, &item) != FALSE)
+            selected.push_back(static_cast<anyID>(item.lParam));
+    }
+    std::lock_guard<std::mutex> lock(g_configMutex);
+    g_config.selected = std::move(selected);
+}
+static void guiStatus() {
+    if (g_guiStatus != nullptr) SetWindowTextW(g_guiStatus, guiW(statusText()).c_str());
+}
+static void guiRefresh() {
+    if (g_guiList == nullptr) return;
+    std::string error;
+    const auto clients = visibleClients(g_guiSchid, &error);
+    if (!error.empty()) {
+        if (g_guiStatus != nullptr) SetWindowTextW(g_guiStatus, guiW(error).c_str());
+        return;
+    }
+    g_guiUpdating = true;
+    ListView_DeleteAllItems(g_guiList);
+    for (std::size_t i = 0; i < clients.size(); ++i) {
+        const Target& target = clients[i];
+        std::wstring text = guiW(label(target));
+        LVITEMW item{};
+        item.mask = LVIF_TEXT | LVIF_PARAM;
+        item.iItem = static_cast<int>(i);
+        item.pszText = text.data();
+        item.lParam = static_cast<LPARAM>(target.id);
+        const int row = ListView_InsertItemW(g_guiList, &item);
+        if (row >= 0) ListView_SetCheckState(g_guiList, row, guiSelected(target.id) ? TRUE : FALSE);
+    }
+    g_guiUpdating = false;
+    guiStatus();
+}
+static bool guiSave() {
+    const std::string rateText = guiU(guiText(g_guiRate));
+    const std::string countText = guiU(guiText(g_guiCount));
+    const std::string message = guiU(guiText(g_guiMessage));
+    double rate = 0.0;
+    std::uint64_t count = 0;
+    try {
+        std::size_t end = 0;
+        rate = std::stod(rateText, &end);
+        if (end != rateText.size() || !validRate(rate)) throw std::invalid_argument("rate");
+    } catch (...) {
+        MessageBoxW(g_guiWindow, L"速率必须是大于 0 的有限数。", L"PokeWave", MB_OK | MB_ICONERROR);
+        return false;
+    }
+    try {
+        std::size_t end = 0;
+        const unsigned long long value = std::stoull(countText, &end, 10);
+        if (end != countText.size() || value == 0) throw std::invalid_argument("count");
+        count = static_cast<std::uint64_t>(value);
+    } catch (...) {
+        MessageBoxW(g_guiWindow, L"次数必须是大于 0 的整数。", L"PokeWave", MB_OK | MB_ICONERROR);
+        return false;
+    }
+    if (!validMessage(message)) {
+        MessageBoxW(g_guiWindow, L"消息不能为空，且最多 256 个 UTF-8 字节。", L"PokeWave", MB_OK | MB_ICONERROR);
+        return false;
+    }
+    guiReadSelection();
+    std::lock_guard<std::mutex> lock(g_configMutex);
+    g_config.rate = rate;
+    g_config.total = count;
+    g_config.message = message;
+    return true;
+}
+static void guiStart() {
+    if (!guiSave()) return;
+    double rate;
+    std::uint64_t count;
+    std::string message;
+    {
+        std::lock_guard<std::mutex> lock(g_configMutex);
+        rate = g_config.rate;
+        count = g_config.total;
+        message = g_config.message;
+    }
+    std::string error;
+    if (!g_controller.start(g_guiSchid, configuredTargets(), rate, count, std::move(message), &error))
+        MessageBoxW(g_guiWindow, guiW(error).c_str(), L"PokeWave", MB_OK | MB_ICONERROR);
+    else
+        logLine(g_guiSchid, LogLevel_INFO, "PokeWave started from GUI.");
+    guiStatus();
+}
+static LRESULT CALLBACK guiProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    switch (message) {
+    case WM_CREATE: {
+        g_guiList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
+            WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SHOWSELALWAYS,
+            10, 10, 470, 430, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kGuiList)),
+            GetModuleHandleW(nullptr), nullptr);
+        guiFont(g_guiList);
+        ListView_SetExtendedListViewStyle(g_guiList, LVS_EX_FULLROWSELECT | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER);
+        LVCOLUMNW column{};
+        column.mask = LVCF_TEXT | LVCF_WIDTH;
+        column.cx = 450;
+        column.pszText = const_cast<LPWSTR>(L"勾选目标客户端（名称 [ID]）");
+        ListView_InsertColumn(g_guiList, 0, &column);
+
+        guiControl(hwnd, L"STATIC", L"速率（poke/s）", SS_LEFT, 500, 12, 230, 20, 0);
+        g_guiRate = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL, 500, 34, 230, 24, kGuiRate);
+        guiControl(hwnd, L"STATIC", L"总次数", SS_LEFT, 500, 68, 230, 20, 0);
+        g_guiCount = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL, 500, 90, 230, 24, kGuiCount);
+        guiControl(hwnd, L"STATIC", L"消息", SS_LEFT, 500, 124, 230, 20, 0);
+        g_guiMessage = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL,
+                                  500, 146, 230, 70, kGuiMessage);
+        guiControl(hwnd, L"BUTTON", L"刷新客户端", BS_PUSHBUTTON, 500, 232, 110, 30, kGuiRefresh);
+        guiControl(hwnd, L"BUTTON", L"开始", BS_DEFPUSHBUTTON, 620, 232, 110, 30, kGuiStart);
+        guiControl(hwnd, L"BUTTON", L"停止", BS_PUSHBUTTON, 500, 270, 110, 30, kGuiStop);
+        guiControl(hwnd, L"STATIC", L"状态", SS_LEFT, 500, 322, 230, 20, 0);
+        g_guiStatus = guiControl(hwnd, L"STATIC", L"", SS_LEFT | SS_EDITCONTROL, 500, 344, 230, 90, kGuiStatus);
+
+        double rate;
+        std::uint64_t count;
+        std::string messageText;
+        {
+            std::lock_guard<std::mutex> lock(g_configMutex);
+            rate = g_config.rate;
+            count = g_config.total;
+            messageText = g_config.message;
+        }
+        SetWindowTextW(g_guiRate, guiW(std::to_string(rate)).c_str());
+        SetWindowTextW(g_guiCount, guiW(std::to_string(count)).c_str());
+        SetWindowTextW(g_guiMessage, guiW(messageText).c_str());
+        guiRefresh();
+        SetTimer(hwnd, 1, 250, nullptr);
+        return 0;
+    }
+    case WM_TIMER:
+        guiStatus();
+        return 0;
+    case WM_COMMAND:
+        if (HIWORD(wParam) == BN_CLICKED) {
+            if (LOWORD(wParam) == kGuiRefresh) guiRefresh();
+            else if (LOWORD(wParam) == kGuiStart) guiStart();
+            else if (LOWORD(wParam) == kGuiStop) { g_controller.stop(); guiStatus(); }
+            return 0;
+        }
+        break;
+    case WM_NOTIFY:
+        if (lParam != 0) {
+            const NMHDR* header = reinterpret_cast<const NMHDR*>(lParam);
+            if (header->idFrom == kGuiList && header->code == LVN_ITEMCHANGED) {
+                const NMLISTVIEW* change = reinterpret_cast<const NMLISTVIEW*>(lParam);
+                if ((change->uChanged & LVIF_STATE) != 0) guiReadSelection();
+            }
+        }
+        break;
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
+    case WM_DESTROY:
+        KillTimer(hwnd, 1);
+        g_guiWindow = nullptr;
+        g_guiList = nullptr;
+        g_guiRate = nullptr;
+        g_guiCount = nullptr;
+        g_guiMessage = nullptr;
+        g_guiStatus = nullptr;
+        return 0;
+    default:
+        break;
+    }
+    return DefWindowProcW(hwnd, message, wParam, lParam);
+}
+static void showGui(uint64 schid) {
+    g_guiSchid = schid != 0 ? schid : currentSchid();
+    if (g_guiWindow != nullptr && IsWindow(g_guiWindow) != FALSE) {
+        ShowWindow(g_guiWindow, SW_SHOWNORMAL);
+        SetForegroundWindow(g_guiWindow);
+        guiRefresh();
+        return;
+    }
+    INITCOMMONCONTROLSEX controls{};
+    controls.dwSize = sizeof(controls);
+    controls.dwICC = ICC_LISTVIEW_CLASSES;
+    InitCommonControlsEx(&controls);
+    const wchar_t* className = L"PokeWaveGuiWindow";
+    HINSTANCE instance = GetModuleHandleW(nullptr);
+    WNDCLASSEXW klass{};
+    klass.cbSize = sizeof(klass);
+    klass.hInstance = instance;
+    klass.lpfnWndProc = guiProc;
+    klass.lpszClassName = className;
+    klass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    klass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    if (GetClassInfoExW(instance, className, &klass) == FALSE) RegisterClassExW(&klass);
+    g_guiWindow = CreateWindowExW(WS_EX_TOOLWINDOW, className, L"PokeWave",
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+        CW_USEDEFAULT, CW_USEDEFAULT, 760, 500, nullptr, nullptr, instance, nullptr);
+    if (g_guiWindow == nullptr) logLine(g_guiSchid, LogLevel_ERROR, "Unable to create the PokeWave GUI window.");
+    else { ShowWindow(g_guiWindow, SW_SHOWNORMAL); UpdateWindow(g_guiWindow); }
+}
+#endif
 }
 
 extern "C" {
 const char* ts3plugin_name() { return "PokeWave"; }
-const char* ts3plugin_version() { return "0.2.0"; }
+const char* ts3plugin_version() { return "0.3.0"; }
 int ts3plugin_apiVersion() { return kApiVersion; }
 const char* ts3plugin_author() { return "Local server administrator"; }
 const char* ts3plugin_description() { return "Controlled multi-target TeamSpeak poke test tool."; }
@@ -312,7 +582,7 @@ void ts3plugin_initMenus(struct PluginMenuItem*** menuItems, char** menuIcon) {
     if ((*menuItems)[0] == nullptr) { std::free(*menuItems); *menuItems = nullptr; return; }
     (*menuItems)[0]->type = PLUGIN_MENU_TYPE_GLOBAL;
     (*menuItems)[0]->id = kMenuOpen;
-    std::strncpy((*menuItems)[0]->text, "PokeWave command help", PLUGIN_MENU_BUFSZ - 1);
+    std::strncpy((*menuItems)[0]->text, "PokeWave GUI", PLUGIN_MENU_BUFSZ - 1);
     (*menuItems)[0]->text[PLUGIN_MENU_BUFSZ - 1] = '\0';
     (*menuItems)[0]->icon[0] = '\0';
     (*menuItems)[1] = nullptr;
@@ -321,6 +591,9 @@ void ts3plugin_initMenus(struct PluginMenuItem*** menuItems, char** menuIcon) {
 void ts3plugin_freeMemory(void* data) { std::free(data); }
 void ts3plugin_currentServerConnectionChanged(uint64 serverConnectionHandlerID) {
     if (g_controller.running() && currentSchid() != serverConnectionHandlerID) g_controller.stop();
+#ifdef _WIN32
+    if (g_guiWindow != nullptr && g_guiSchid != serverConnectionHandlerID) DestroyWindow(g_guiWindow);
+#endif
     setCurrentSchid(serverConnectionHandlerID);
 }
 void ts3plugin_onConnectStatusChangeEvent(uint64 schid, int status, unsigned int) {
@@ -333,7 +606,13 @@ void ts3plugin_onConnectStatusChangeEvent(uint64 schid, int status, unsigned int
     }
 }
 void ts3plugin_onMenuItemEvent(uint64 schid, enum PluginMenuType type, int menuItemID, uint64) {
-    if (type == PLUGIN_MENU_TYPE_GLOBAL && menuItemID == kMenuOpen) help(schid);
+    if (type == PLUGIN_MENU_TYPE_GLOBAL && menuItemID == kMenuOpen) {
+#ifdef _WIN32
+        showGui(schid);
+#else
+        help(schid);
+#endif
+    }
 }
 
 int ts3plugin_processCommand(uint64 serverConnectionHandlerID, const char* command) {
