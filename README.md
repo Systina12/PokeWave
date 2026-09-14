@@ -1,20 +1,27 @@
 # PokeWave
 
-TeamSpeak 3 原生客户端 Poke 测试插件，使用官方 Client Plugin SDK 的 `requestClientPoke`。
+TeamSpeak 3 native client plugin for controlled poke testing on a server you administer.
 
-当前版本不设置速率和次数的业务上限：速率必须是正的有限数；总次数必须是大于 0 且能放入 `uint64` 的有限整数。任务可随时 `/pokewave stop`，断线和插件卸载会自动停止。
+## Features
 
-## 构建
+- Windows native Win32 GUI opened from the TeamSpeak global plugin menu.
+- Refreshes visible clients and supports multi-select with checkboxes.
+- Configures poke rate, total count and message from the GUI.
+- Command interface remains available through `/pokewave`.
+- No project-defined upper cap on rate or count. Rate must be positive and finite; count is a positive uint64 value.
+- Stop button, `stop` command, disconnect handling and plugin unload stop active work.
 
-```bash
-git clone --depth=1 https://github.com/teamspeak/ts3client-pluginsdk.git
-cmake -S . -B build -DTS3_SDK_DIR=/path/to/ts3client-pluginsdk
-cmake --build build --config Release
-```
+## Windows installation
 
-`TS3_SDK_DIR` 必须指向包含 `include/ts3_functions.h` 的 SDK 根目录。
+1. Download `PokeWave-windows-x64.zip` from Releases.
+2. Extract `pokewave.dll`.
+3. Copy it to `%APPDATA%\\TS3Client\\plugins`.
+4. Restart TeamSpeak 3.
+5. Open the global plugin menu and choose `PokeWave GUI`.
 
-## 使用
+The plugin calls the official TeamSpeak 3 client `requestClientPoke` API. The server still decides whether the account has permission and may apply its own flood protection.
+
+## Commands
 
 ```text
 /pokewave help
@@ -30,8 +37,16 @@ cmake --build build --config Release
 /pokewave stop
 ```
 
-`select` 替换多选列表，`add` 追加目标；client ID 来自 `list`。
+Speed is expressed in poke operations per second. Targets are sent in round-robin order.
 
-高频测试只应在自己管理的服务器和明确同意的测试客户端上使用。服务器仍然会执行 poke 权限和 flood protection。
+## Build
 
-TeamSpeak SDK：https://github.com/teamspeak/ts3client-pluginsdk
+Clone the official TeamSpeak plugin SDK and configure with CMake:
+
+```bash
+git clone --depth=1 https://github.com/TeamSpeak-Systems/ts3client-pluginsdk.git /tmp/ts3client-pluginsdk
+cmake -S . -B build -DTS3_SDK_DIR=/tmp/ts3client-pluginsdk
+cmake --build build --config Release
+```
+
+GitHub Actions builds Linux x64 and Windows x64 artifacts. The Windows job also downloads TeamSpeak 3 Client 3.6.2, starts it and verifies that the client loads `pokewave.dll`.
