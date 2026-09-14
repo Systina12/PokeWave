@@ -10,13 +10,13 @@ PokeWave is a native TeamSpeak 3 client plugin for controlled poke testing on se
 
 ## Features
 
-- Native Windows GUI opened from the top-level \`Plugins → PokeWave GUI\` menu.
+- Native Windows GUI opened from the top-level `Plugins → PokeWave GUI` menu.
 - Refreshes visible clients and supports checkbox-based multi-selection.
 - Configurable poke rate, total count, and message.
-- \`/pokewave\` command interface with responses printed to the current TeamSpeak tab.
+- `/pokewave` command interface with responses printed to the current TeamSpeak tab.
 - Immediate stop support; disconnecting or unloading the plugin stops active work.
-- No project-defined upper bound for rate or count; rate must be positive and finite, and count must be a positive \`uint64\`.
-- Uses the official \`requestClientPoke\` API; the server still decides whether the request is permitted.
+- No project-defined upper bound for rate or count; rate must be positive and finite, and count must be a positive `uint64`.
+- Uses the official `requestClientPoke` API; the server still decides whether the request is permitted.
 
 ## Installation
 
@@ -24,15 +24,15 @@ Current release: [v0.3.2](https://github.com/Systina12/PokeWave/releases/tag/v0.
 
 1. Exit TeamSpeak 3 completely.
 2. Download [PokeWave-windows-x64.zip](https://github.com/Systina12/PokeWave/releases/download/v0.3.2/PokeWave-windows-x64.zip).
-3. Extract \`pokewave.dll\`.
+3. Extract `pokewave.dll`.
 4. Copy the DLL to:
 
-   \`\`\`text
+   ```text
    %APPDATA%\TS3Client\plugins
-   \`\`\`
+   ```
 
-5. Make sure no older duplicate \`pokewave.dll\` is being loaded, then start TeamSpeak 3.
-6. Open \`Plugins → PokeWave GUI\` from the top menu.
+5. Make sure no older duplicate `pokewave.dll` is being loaded, then start TeamSpeak 3.
+6. Open `Plugins → PokeWave GUI` from the top menu.
 
 The control panel is deliberately not exposed through Settings/Configure. This plugin targets the TeamSpeak 3 x64 client and does not support TeamSpeak 5.
 
@@ -40,7 +40,7 @@ The control panel is deliberately not exposed through Settings/Configure. This p
 
 Run these commands in the TeamSpeak 3 chat input:
 
-\`\`\`text
+```text
 /pokewave help
 /pokewave list
 /pokewave select 12,13,14
@@ -52,15 +52,15 @@ Run these commands in the TeamSpeak 3 chat input:
 /pokewave start
 /pokewave status
 /pokewave stop
-\`\`\`
+```
 
-- \`list\`: lists clients visible to the plugin on the current server.
-- \`select\`: clears the current selection and selects the given Client IDs.
-- \`add/remove\`: adds or removes targets.
-- \`speed\`: sets poke operations per second.
-- \`count\`: sets the total number of requests.
-- \`message\`: sets the poke message.
-- \`start/stop/status\`: starts, stops, or reports the current task.
+- `list`: lists clients visible to the plugin on the current server.
+- `select`: clears the current selection and selects the given Client IDs.
+- `add/remove`: adds or removes targets.
+- `speed`: sets poke operations per second.
+- `count`: sets the total number of requests.
+- `message`: sets the poke message.
+- `start/stop/status`: starts, stops, or reports the current task.
 
 Targets are sent in round-robin order. For example, selecting 12, 13, and 14 sends requests to 12 → 13 → 14 → 12.
 
@@ -82,16 +82,16 @@ PokeWave is intended for testing servers you administer or have explicit authori
 
 Use the official TeamSpeak plugin SDK:
 
-\`\`\`bash
+```bash
 git clone --depth=1 https://github.com/teamspeak/ts3client-pluginsdk.git /tmp/ts3client-pluginsdk
 cmake -S . -B build -DTS3_SDK_DIR=/tmp/ts3client-pluginsdk
 cmake --build build --config Release
-\`\`\`
+```
 
 Run the tests:
 
-\`\`\`bash
+```bash
 ctest --test-dir build --output-on-failure
-\`\`\`
+```
 
 GitHub Actions builds Linux x64 and Windows x64 artifacts, and verifies command feedback, the GUI callback, Windows UTF-8 compilation, and loading inside the TeamSpeak 3 client.
