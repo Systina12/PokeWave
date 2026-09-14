@@ -79,34 +79,32 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\TeamSpeak3-Client-win64-3.6.2.exe"
           $size = (Get-Item "$env:RUNNER_TEMP\TeamSpeak3-Client-win64-3.6.2.exe").Length
           if ($size -lt 50000000) { throw "TeamSpeak installer download is unexpectedly small: $size bytes" }
-      - name: Install TeamSpeak 3 client
+      - name: Extract TeamSpeak 3 client
         shell: pwsh
         run: |
           $installer = "$env:RUNNER_TEMP\TeamSpeak3-Client-win64-3.6.2.exe"
-          $process = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
-          Write-Host "Installer exit code: $($process.ExitCode)"
-          $roots = @(
-            "$env:ProgramFiles\TeamSpeak 3 Client",
-            "\${env:ProgramFiles(x86)}\TeamSpeak 3 Client",
-            "$env:LOCALAPPDATA\TeamSpeak 3 Client",
-            "$env:RUNNER_TEMP"
-          )
-          $client = $null
-          foreach ($root in $roots) {
-            if (Test-Path $root) {
-              $client = Get-ChildItem -Path $root -Filter "ts3client_win64.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($null -ne $client) { break }
-            }
-          }
-          if ($null -eq $client) { throw "TeamSpeak 3 client executable was not found after installation" }
+          $extract = "$env:RUNNER_TEMP\ts3-client"
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          $sevenZip = Get-Command 7z.exe -ErrorAction SilentlyContinue
+          if ($null -eq $sevenZip) { throw "7z.exe is required on the Windows runner" }
+          & $sevenZip.Source x $installer "-o$extract" -y
+          if ($LASTEXITCODE -ne 0) { throw "TeamSpeak package extraction failed" }
+          $client = Get-ChildItem -Path $extract -Filter "ts3client_win64.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -eq $client) { throw "TeamSpeak 3 client executable was not found after extraction" }
           "TS3CLIENT_EXE=$($client.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
+          "TS3CLIENT_DIR=$($client.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
           Write-Host "Using TeamSpeak client: $($client.FullName)"
       - name: Load plugin in TeamSpeak client
         shell: pwsh
         run: |
-          $pluginDir = Join-Path $env:APPDATA "TS3Client\plugins"
-          New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
-          Copy-Item "package\extracted\pokewave.dll" (Join-Path $pluginDir "pokewave.dll") -Force
+          $pluginDirs = @(
+            (Join-Path $env:APPDATA "TS3Client\plugins"),
+            (Join-Path $env:TS3CLIENT_DIR "plugins")
+          )
+          foreach ($pluginDir in $pluginDirs) {
+            New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
+            Copy-Item "package\extracted\pokewave.dll" (Join-Path $pluginDir "pokewave.dll") -Force
+          }
           $client = Start-Process -FilePath $env:TS3CLIENT_EXE -ArgumentList "-nosingleinstance" -PassThru
           Start-Sleep -Seconds 12
           $client.Refresh()
