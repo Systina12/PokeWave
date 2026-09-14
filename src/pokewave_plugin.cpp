@@ -363,7 +363,7 @@ static void guiReadSelection() {
         LVITEMW item{};
         item.mask = LVIF_PARAM;
         item.iItem = i;
-        if (ListView_GetItemW(g_guiList, &item) != FALSE)
+        if (ListView_GetItem(g_guiList, &item) != FALSE)
             selected.push_back(static_cast<anyID>(item.lParam));
     }
     std::lock_guard<std::mutex> lock(g_configMutex);
@@ -390,7 +390,7 @@ static void guiRefresh() {
         item.iItem = static_cast<int>(i);
         item.pszText = text.data();
         item.lParam = static_cast<LPARAM>(target.id);
-        const int row = ListView_InsertItemW(g_guiList, &item);
+        const int row = ListView_InsertItem(g_guiList, &item);
         if (row >= 0) ListView_SetCheckState(g_guiList, row, guiSelected(target.id) ? TRUE : FALSE);
     }
     g_guiUpdating = false;
