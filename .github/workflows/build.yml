@@ -199,8 +199,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.3.2
-          name: PokeWave v0.3.2
+          tag_name: v0.3.3
+          name: PokeWave v0.3.3
           target_commitish: main
           generate_release_notes: true
           files: |
