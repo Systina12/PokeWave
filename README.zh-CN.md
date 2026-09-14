@@ -10,13 +10,13 @@ PokeWave 是一个 TeamSpeak 3 原生客户端插件，用于在你管理的服�
 
 ## 功能
 
-- Windows 原生 GUI，从顶部菜单 \`Plugins → PokeWave GUI\` 打开。
+- Windows 原生 GUI，从顶部菜单 `Plugins → PokeWave GUI` 打开。
 - 刷新插件能够看到的客户端，并通过复选框多选目标。
 - 可调 Poke 速率、总次数和消息内容。
-- 支持 \`/pokewave\` 命令，结果会显示在当前 TeamSpeak 标签页。
+- 支持 `/pokewave` 命令，结果会显示在当前 TeamSpeak 标签页。
 - 可随时停止；断开服务器或卸载插件时会停止任务。
-- 项目不人为设置速率和次数上限；速率必须为正的有限数，次数必须为正的 \`uint64\`。
-- 使用官方 \`requestClientPoke\` API，最终是否允许发送由服务器权限决定。
+- 项目不人为设置速率和次数上限；速率必须为正的有限数，次数必须为正的 `uint64`。
+- 使用官方 `requestClientPoke` API，最终是否允许发送由服务器权限决定。
 
 ## 安装
 
@@ -24,15 +24,15 @@ PokeWave 是一个 TeamSpeak 3 原生客户端插件，用于在你管理的服�
 
 1. 完全退出 TeamSpeak 3。
 2. 下载 [PokeWave-windows-x64.zip](https://github.com/Systina12/PokeWave/releases/download/v0.3.2/PokeWave-windows-x64.zip)。
-3. 解压 \`pokewave.dll\`。
+3. 解压 `pokewave.dll`。
 4. 将 DLL 放入：
 
-   \`\`\`text
+   ```text
    %APPDATA%\TS3Client\plugins
-   \`\`\`
+   ```
 
-5. 确认机器上没有其他旧版 \`pokewave.dll\`，然后启动 TeamSpeak 3。
-6. 从顶部菜单打开 \`Plugins → PokeWave GUI\`。
+5. 确认机器上没有其他旧版 `pokewave.dll`，然后启动 TeamSpeak 3。
+6. 从顶部菜单打开 `Plugins → PokeWave GUI`。
 
 插件面板不会放在 Settings/Configure 中。当前插件面向 TeamSpeak 3 x64 客户端，TeamSpeak 5 不适用。
 
@@ -40,7 +40,7 @@ PokeWave 是一个 TeamSpeak 3 原生客户端插件，用于在你管理的服�
 
 在 TeamSpeak 3 的聊天输入框执行：
 
-\`\`\`text
+```text
 /pokewave help
 /pokewave list
 /pokewave select 12,13,14
@@ -52,15 +52,15 @@ PokeWave 是一个 TeamSpeak 3 原生客户端插件，用于在你管理的服�
 /pokewave start
 /pokewave status
 /pokewave stop
-\`\`\`
+```
 
-- \`list\`：列出当前服务器上插件能够看到的客户端。
-- \`select\`：清空当前选择并选择指定 Client ID。
-- \`add/remove\`：增加或移除目标。
-- \`speed\`：设置每秒 Poke 操作数。
-- \`count\`：设置总发送次数。
-- \`message\`：设置 Poke 消息。
-- \`start/stop/status\`：开始、停止或查看任务状态。
+- `list`：列出当前服务器上插件能够看到的客户端。
+- `select`：清空当前选择并选择指定 Client ID。
+- `add/remove`：增加或移除目标。
+- `speed`：设置每秒 Poke 操作数。
+- `count`：设置总发送次数。
+- `message`：设置 Poke 消息。
+- `start/stop/status`：开始、停止或查看任务状态。
 
 目标按轮询顺序发送。例如选择 12、13、14 后，会依次发送给 12 → 13 → 14 → 12。
 
@@ -82,16 +82,16 @@ PokeWave 面向你拥有管理权限或明确获授权的服务器测试。高�
 
 需要官方 TeamSpeak 插件 SDK：
 
-\`\`\`bash
+```bash
 git clone --depth=1 https://github.com/teamspeak/ts3client-pluginsdk.git /tmp/ts3client-pluginsdk
 cmake -S . -B build -DTS3_SDK_DIR=/tmp/ts3client-pluginsdk
 cmake --build build --config Release
-\`\`\`
+```
 
 运行测试：
 
-\`\`\`bash
+```bash
 ctest --test-dir build --output-on-failure
-\`\`\`
+```
 
 GitHub Actions 会构建 Linux x64 和 Windows x64 产物，并验证命令回显、GUI 回调、Windows UTF-8 编译以及 TeamSpeak 3 客户端加载。
