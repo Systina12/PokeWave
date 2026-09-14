@@ -319,6 +319,11 @@ static HWND g_guiStatus = nullptr;
 static HWND g_guiServer = nullptr;
 static uint64 g_guiSchid = 0;
 static bool g_guiUpdating = false;
+static HFONT g_guiFont = nullptr;
+static HFONT g_titleFont = nullptr;
+static HBRUSH g_background = nullptr;
+static HWND g_progress = nullptr;
+
 
 static std::wstring guiW(const std::string& value) {
     if (value.empty()) return {};
@@ -350,11 +355,11 @@ static std::wstring guiText(HWND control) {
 }
 static void guiFont(HWND control) {
     if (control != nullptr) SendMessageW(control, WM_SETFONT,
-        reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+        reinterpret_cast<WPARAM>(g_guiFont ? g_guiFont : GetStockObject(DEFAULT_GUI_FONT)), TRUE);
 }
 static HWND guiControl(HWND parent, const wchar_t* cls, const wchar_t* text, DWORD style,
                        int x, int y, int w, int h, int id) {
-    HWND control = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
+    HWND control = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | style,
         x, y, w, h, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
         GetModuleHandleW(nullptr), nullptr);
     guiFont(control);
@@ -389,6 +394,13 @@ static void guiReadSelection() {
 }
 static void guiStatus() {
     if (g_guiStatus != nullptr) guiSetText(g_guiStatus, guiW(statusText()));
+    const auto state = g_controller.snapshot();
+    if (g_guiWindow) {
+        EnableWindow(GetDlgItem(g_guiWindow, kGuiStart), !state.running);
+        EnableWindow(GetDlgItem(g_guiWindow, kGuiStop), state.running);
+    }
+    if (g_progress) SendMessageW(g_progress, PBM_SETPOS,
+        state.total ? static_cast<WPARAM>(1000.0L * state.sent / state.total) : 0, 0);
 }
 static void guiSelectAll(bool selected) {
     if (g_guiList == nullptr) return;
@@ -484,44 +496,54 @@ static void guiStart() {
 static LRESULT CALLBACK guiProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
-        guiControl(hwnd, L"STATIC", L"PokeWave \u63a7\u5236\u9762\u677f", SS_LEFT, 16, 12, 500, 26, 0);
-        g_guiServer = guiControl(hwnd, L"STATIC", L"", SS_LEFT, 16, 42, 880, 22, kGuiServer);
-
+        g_guiFont = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+            DEFAULT_PITCH, L"Microsoft YaHei UI");
+        g_titleFont = CreateFontW(-28, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+            DEFAULT_PITCH, L"Segoe UI");
+        g_background = CreateSolidBrush(RGB(245, 247, 251));
+        HWND title = guiControl(hwnd, L"STATIC", L"PokeWave", SS_LEFT, 28, 20, 450, 38, 0);
+        SendMessageW(title, WM_SETFONT, reinterpret_cast<WPARAM>(g_titleFont), TRUE);
+        g_guiServer = guiControl(hwnd, L"STATIC", L"", SS_LEFT, 30, 66, 820, 24, kGuiServer);
+        guiControl(hwnd, L"STATIC", L"目标客户端", SS_LEFT, 30, 112, 300, 24, 0);
         g_guiList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
-            WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SHOWSELALWAYS,
-            16, 75, 535, 425, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kGuiList)),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SHOWSELALWAYS,
+            30, 148, 510, 350, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kGuiList)),
             GetModuleHandleW(nullptr), nullptr);
         guiFont(g_guiList);
-        ListView_SetExtendedListViewStyle(g_guiList, LVS_EX_FULLROWSELECT | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER);
-        LVCOLUMNW nameColumn{};
-        nameColumn.mask = LVCF_TEXT | LVCF_WIDTH;
-        nameColumn.cx = 405;
-        nameColumn.pszText = const_cast<LPWSTR>(L"\u76ee\u6807\u6635\u79f0");
-        ListView_InsertColumn(g_guiList, 0, &nameColumn);
-        LVCOLUMNW idColumn{};
-        idColumn.mask = LVCF_TEXT | LVCF_WIDTH;
-        idColumn.cx = 105;
-        idColumn.pszText = const_cast<LPWSTR>(L"Client ID");
-        ListView_InsertColumn(g_guiList, 1, &idColumn);
-
-        guiControl(hwnd, L"BUTTON", L"\u5237\u65b0", BS_PUSHBUTTON, 16, 515, 90, 30, kGuiRefresh);
-        guiControl(hwnd, L"BUTTON", L"\u5168\u9009", BS_PUSHBUTTON, 116, 515, 90, 30, kGuiSelectAll);
-        guiControl(hwnd, L"BUTTON", L"\u6e05\u7a7a", BS_PUSHBUTTON, 216, 515, 90, 30, kGuiSelectNone);
-        guiControl(hwnd, L"STATIC", L"\u52fe\u9009\u76ee\u6807\u540e\u5f00\u59cb\u53d1\u9001", SS_LEFT, 320, 520, 225, 20, 0);
-
-        guiControl(hwnd, L"BUTTON", L"\u53d1\u9001\u8bbe\u7f6e", BS_GROUPBOX, 570, 75, 330, 270, 0);
-        guiControl(hwnd, L"STATIC", L"\u53d1\u9001\u901f\u7387 (poke/s)", SS_LEFT, 590, 112, 140, 20, 0);
-        g_guiRate = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL, 735, 108, 140, 24, kGuiRate);
-        guiControl(hwnd, L"STATIC", L"\u603b\u6b21\u6570", SS_LEFT, 590, 150, 140, 20, 0);
-        g_guiCount = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER, 735, 146, 140, 24, kGuiCount);
-        guiControl(hwnd, L"STATIC", L"\u6d88\u606f", SS_LEFT, 590, 188, 140, 20, 0);
-        g_guiMessage = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL,
-                                  590, 212, 285, 70, kGuiMessage);
-        guiControl(hwnd, L"BUTTON", L"\u5f00\u59cb", BS_DEFPUSHBUTTON, 590, 302, 135, 30, kGuiStart);
-        guiControl(hwnd, L"BUTTON", L"\u505c\u6b62", BS_PUSHBUTTON, 740, 302, 135, 30, kGuiStop);
-
-        guiControl(hwnd, L"BUTTON", L"\u72b6\u6001", BS_GROUPBOX, 570, 365, 330, 135, 0);
-        g_guiStatus = guiControl(hwnd, L"STATIC", L"", SS_LEFT | SS_EDITCONTROL, 590, 402, 285, 75, kGuiStatus);
+        ListView_SetExtendedListViewStyle(g_guiList,
+            LVS_EX_FULLROWSELECT | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER);
+        ListView_SetTextColor(g_guiList, RGB(31, 41, 55));
+        LVCOLUMNW column{};
+        column.mask = LVCF_TEXT | LVCF_WIDTH;
+        column.cx = 380;
+        column.pszText = const_cast<LPWSTR>(L"昵称");
+        ListView_InsertColumn(g_guiList, 0, &column);
+        column.cx = 100;
+        column.pszText = const_cast<LPWSTR>(L"Client ID");
+        ListView_InsertColumn(g_guiList, 1, &column);
+        guiControl(hwnd, L"BUTTON", L"刷新", BS_PUSHBUTTON, 30, 514, 100, 36, kGuiRefresh);
+        guiControl(hwnd, L"BUTTON", L"全选", BS_PUSHBUTTON, 142, 514, 100, 36, kGuiSelectAll);
+        guiControl(hwnd, L"BUTTON", L"清空", BS_PUSHBUTTON, 254, 514, 100, 36, kGuiSelectNone);
+        guiControl(hwnd, L"STATIC", L"发送设置", SS_LEFT, 574, 112, 300, 24, 0);
+        guiControl(hwnd, L"STATIC", L"速率 · poke/s", SS_LEFT, 574, 156, 140, 24, 0);
+        guiControl(hwnd, L"STATIC", L"总次数", SS_LEFT, 738, 156, 138, 24, 0);
+        g_guiRate = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL,
+            574, 188, 142, 34, kGuiRate);
+        g_guiCount = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
+            738, 188, 138, 34, kGuiCount);
+        guiControl(hwnd, L"STATIC", L"Poke 消息", SS_LEFT, 574, 244, 300, 24, 0);
+        g_guiMessage = guiControl(hwnd, L"EDIT", L"",
+            WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL,
+            574, 276, 302, 100, kGuiMessage);
+        guiControl(hwnd, L"BUTTON", L"开始发送", BS_DEFPUSHBUTTON, 574, 400, 184, 42, kGuiStart);
+        guiControl(hwnd, L"BUTTON", L"停止", BS_PUSHBUTTON, 770, 400, 106, 42, kGuiStop);
+        g_progress = guiControl(hwnd, PROGRESS_CLASSW, L"", PBS_SMOOTH,
+            574, 466, 302, 8, 2022);
+        SendMessageW(g_progress, PBM_SETRANGE32, 0, 1000);
+        g_guiStatus = guiControl(hwnd, L"STATIC", L"", SS_LEFT | SS_EDITCONTROL,
+            574, 488, 302, 64, kGuiStatus);
 
         double rate;
         std::uint64_t count;
@@ -540,6 +562,17 @@ static LRESULT CALLBACK guiProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
         guiRefresh();
         SetTimer(hwnd, 1, 250, nullptr);
         return 0;
+    }
+    case WM_CTLCOLORSTATIC: {
+        HDC dc = reinterpret_cast<HDC>(wParam);
+        SetTextColor(dc, RGB(45, 55, 72));
+        SetBkColor(dc, RGB(245, 247, 251));
+        return reinterpret_cast<LRESULT>(g_background);
+    }
+    case WM_ERASEBKGND: {
+        RECT area; GetClientRect(hwnd, &area);
+        if (g_background) FillRect(reinterpret_cast<HDC>(wParam), &area, g_background);
+        return 1;
     }
     case WM_TIMER:
         guiStatus();
@@ -575,6 +608,11 @@ static LRESULT CALLBACK guiProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
         g_guiMessage = nullptr;
         g_guiStatus = nullptr;
         g_guiServer = nullptr;
+        g_progress = nullptr;
+        if (g_guiFont) DeleteObject(g_guiFont);
+        if (g_titleFont) DeleteObject(g_titleFont);
+        if (g_background) DeleteObject(g_background);
+        g_guiFont = nullptr; g_titleFont = nullptr; g_background = nullptr;
         return 0;
     default:
         break;
@@ -592,7 +630,7 @@ static void showGui(uint64 schid) {
     }
     INITCOMMONCONTROLSEX controls{};
     controls.dwSize = sizeof(controls);
-    controls.dwICC = ICC_LISTVIEW_CLASSES;
+    controls.dwICC = ICC_LISTVIEW_CLASSES | ICC_PROGRESS_CLASS;
     InitCommonControlsEx(&controls);
     const wchar_t* className = L"PokeWaveGuiWindow";
     HINSTANCE instance = GetModuleHandleW(nullptr);
@@ -604,9 +642,12 @@ static void showGui(uint64 schid) {
     klass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     klass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     if (GetClassInfoExW(instance, className, &klass) == FALSE) RegisterClassExW(&klass);
+    RECT windowBounds{0, 0, 906, 580};
+    AdjustWindowRectEx(&windowBounds,
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, WS_EX_APPWINDOW);
     g_guiWindow = CreateWindowExW(WS_EX_APPWINDOW, className, L"PokeWave",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 920, 600, nullptr, nullptr, instance, nullptr);
+        CW_USEDEFAULT, CW_USEDEFAULT, windowBounds.right - windowBounds.left, windowBounds.bottom - windowBounds.top, nullptr, nullptr, instance, nullptr);
     if (g_guiWindow == nullptr) {
         logLine(g_guiSchid, LogLevel_ERROR, "Unable to create the PokeWave GUI window.");
     } else {
