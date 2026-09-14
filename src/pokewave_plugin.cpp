@@ -299,7 +299,7 @@ static std::string statusText() {
     return out.str();
 }
 static void help(uint64 schid) {
-    logLine(schid, LogLevel_INFO,
+    commandReply(schid, LogLevel_INFO,
             "PokeWave: list | select <id,...> | add <id,...> | remove <id,...> | "
             "speed <positive> | count <positive uint64> | message <text> | start | stop | status");
 }
@@ -616,7 +616,9 @@ static void showGui(uint64 schid) {
     }
 }
 #endif
+}
 
+extern "C" {
 const char* ts3plugin_name() { return "PokeWave"; }
 const char* ts3plugin_version() { return "0.3.2"; }
 int ts3plugin_apiVersion() { return kApiVersion; }
