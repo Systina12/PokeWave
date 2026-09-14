@@ -13,7 +13,7 @@ TeamSpeak 3 native client plugin for controlled poke testing on a server you adm
 
 ## Windows installation
 
-The current Windows release is v0.3.2.
+The current Windows release is v0.3.2 (standalone GUI and current-tab command feedback).
 
 1. Download `PokeWave-windows-x64.zip` from the v0.3.2 Release.
 2. Extract `pokewave.dll`.
