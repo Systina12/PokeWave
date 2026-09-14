@@ -20,10 +20,10 @@ PokeWave 是一个 TeamSpeak 3 原生客户端插件，用于在你管理的服�
 
 ## 安装
 
-当前版本：[v0.3.2](https://github.com/Systina12/PokeWave/releases/tag/v0.3.2)
+当前版本：[v0.3.3](https://github.com/Systina12/PokeWave/releases/tag/v0.3.3)
 
 1. 完全退出 TeamSpeak 3。
-2. 下载 [PokeWave-windows-x64.zip](https://github.com/Systina12/PokeWave/releases/download/v0.3.2/PokeWave-windows-x64.zip)。
+2. 下载 [PokeWave-windows-x64.zip](https://github.com/Systina12/PokeWave/releases/download/v0.3.3/PokeWave-windows-x64.zip)。
 3. 解压 `pokewave.dll`。
 4. 将 DLL 放入：
 
