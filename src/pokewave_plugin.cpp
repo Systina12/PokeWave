@@ -50,6 +50,13 @@ static std::string g_pluginId;
 static void logLine(uint64 schid, LogLevel level, const std::string& text) {
     if (g_ts3.logMessage != nullptr) g_ts3.logMessage(text.c_str(), level, "PokeWave", schid);
 }
+static void commandReply(uint64 schid, LogLevel level, const std::string& text) {
+    logLine(schid, level, text);
+    if (g_ts3.printMessageToCurrentTab != nullptr) {
+        const std::string line = "[PokeWave] " + text;
+        g_ts3.printMessageToCurrentTab(line.c_str());
+    }
+}
 static std::string getErrorText(unsigned int code) {
     if (g_ts3.getErrorMessage != nullptr) {
         char* text = nullptr;
@@ -300,7 +307,8 @@ static void help(uint64 schid) {
 #ifdef _WIN32
 enum GuiId {
     kGuiList = 2001, kGuiRate = 2002, kGuiCount = 2003, kGuiMessage = 2004,
-    kGuiRefresh = 2010, kGuiStart = 2011, kGuiStop = 2012, kGuiStatus = 2020
+    kGuiRefresh = 2010, kGuiSelectAll = 2011, kGuiSelectNone = 2012,
+    kGuiStart = 2013, kGuiStop = 2014, kGuiStatus = 2020, kGuiServer = 2021
 };
 static HWND g_guiWindow = nullptr;
 static HWND g_guiList = nullptr;
@@ -308,6 +316,7 @@ static HWND g_guiRate = nullptr;
 static HWND g_guiCount = nullptr;
 static HWND g_guiMessage = nullptr;
 static HWND g_guiStatus = nullptr;
+static HWND g_guiServer = nullptr;
 static uint64 g_guiSchid = 0;
 static bool g_guiUpdating = false;
 
@@ -351,6 +360,15 @@ static HWND guiControl(HWND parent, const wchar_t* cls, const wchar_t* text, DWO
     guiFont(control);
     return control;
 }
+static void guiSetText(HWND control, const std::wstring& value) {
+    if (control != nullptr) SetWindowTextW(control, value.c_str());
+}
+static void guiUpdateServerLabel() {
+    if (g_guiServer == nullptr) return;
+    std::wstring text = L"当前服务器连接: ";
+    text += g_guiSchid == 0 ? L"未连接" : std::to_wstring(g_guiSchid);
+    guiSetText(g_guiServer, text);
+}
 static bool guiSelected(anyID id) {
     std::lock_guard<std::mutex> lock(g_configMutex);
     return std::find(g_config.selected.begin(), g_config.selected.end(), id) != g_config.selected.end();
@@ -370,30 +388,45 @@ static void guiReadSelection() {
     g_config.selected = std::move(selected);
 }
 static void guiStatus() {
-    if (g_guiStatus != nullptr) SetWindowTextW(g_guiStatus, guiW(statusText()).c_str());
+    if (g_guiStatus != nullptr) guiSetText(g_guiStatus, guiW(statusText()));
+}
+static void guiSelectAll(bool selected) {
+    if (g_guiList == nullptr) return;
+    g_guiUpdating = true;
+    for (int i = 0, n = ListView_GetItemCount(g_guiList); i < n; ++i)
+        ListView_SetCheckState(g_guiList, i, selected ? TRUE : FALSE);
+    g_guiUpdating = false;
+    guiReadSelection();
 }
 static void guiRefresh() {
     if (g_guiList == nullptr) return;
     std::string error;
     const auto clients = visibleClients(g_guiSchid, &error);
-    if (!error.empty()) {
-        if (g_guiStatus != nullptr) SetWindowTextW(g_guiStatus, guiW(error).c_str());
-        return;
-    }
     g_guiUpdating = true;
     ListView_DeleteAllItems(g_guiList);
+    if (!error.empty()) {
+        g_guiUpdating = false;
+        guiUpdateServerLabel();
+        guiSetText(g_guiStatus, guiW(error));
+        return;
+    }
     for (std::size_t i = 0; i < clients.size(); ++i) {
         const Target& target = clients[i];
-        std::wstring text = guiW(label(target));
+        std::wstring name = guiW(target.name);
         LVITEMW item{};
         item.mask = LVIF_TEXT | LVIF_PARAM;
         item.iItem = static_cast<int>(i);
-        item.pszText = text.data();
+        item.pszText = name.empty() ? const_cast<LPWSTR>(L"") : name.data();
         item.lParam = static_cast<LPARAM>(target.id);
         const int row = ListView_InsertItem(g_guiList, &item);
-        if (row >= 0) ListView_SetCheckState(g_guiList, row, guiSelected(target.id) ? TRUE : FALSE);
+        if (row >= 0) {
+            std::wstring id = std::to_wstring(static_cast<unsigned int>(target.id));
+            ListView_SetItemText(g_guiList, row, 1, id.data());
+            ListView_SetCheckState(g_guiList, row, guiSelected(target.id) ? TRUE : FALSE);
+        }
     }
     g_guiUpdating = false;
+    guiUpdateServerLabel();
     guiStatus();
 }
 static bool guiSave() {
@@ -445,36 +478,50 @@ static void guiStart() {
     if (!g_controller.start(g_guiSchid, configuredTargets(), rate, count, std::move(message), &error))
         MessageBoxW(g_guiWindow, guiW(error).c_str(), L"PokeWave", MB_OK | MB_ICONERROR);
     else
-        logLine(g_guiSchid, LogLevel_INFO, "PokeWave started from GUI.");
+        commandReply(g_guiSchid, LogLevel_INFO, "PokeWave started from GUI.");
     guiStatus();
 }
 static LRESULT CALLBACK guiProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
+        guiControl(hwnd, L"STATIC", L"PokeWave \u63a7\u5236\u9762\u677f", SS_LEFT, 16, 12, 500, 26, 0);
+        g_guiServer = guiControl(hwnd, L"STATIC", L"", SS_LEFT, 16, 42, 880, 22, kGuiServer);
+
         g_guiList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
             WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SHOWSELALWAYS,
-            10, 10, 470, 430, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kGuiList)),
+            16, 75, 535, 425, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kGuiList)),
             GetModuleHandleW(nullptr), nullptr);
         guiFont(g_guiList);
         ListView_SetExtendedListViewStyle(g_guiList, LVS_EX_FULLROWSELECT | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER);
-        LVCOLUMNW column{};
-        column.mask = LVCF_TEXT | LVCF_WIDTH;
-        column.cx = 450;
-        column.pszText = const_cast<LPWSTR>(L"勾选目标客户端（名称 [ID]）");
-        ListView_InsertColumn(g_guiList, 0, &column);
+        LVCOLUMNW nameColumn{};
+        nameColumn.mask = LVCF_TEXT | LVCF_WIDTH;
+        nameColumn.cx = 405;
+        nameColumn.pszText = const_cast<LPWSTR>(L"\u76ee\u6807\u6635\u79f0");
+        ListView_InsertColumn(g_guiList, 0, &nameColumn);
+        LVCOLUMNW idColumn{};
+        idColumn.mask = LVCF_TEXT | LVCF_WIDTH;
+        idColumn.cx = 105;
+        idColumn.pszText = const_cast<LPWSTR>(L"Client ID");
+        ListView_InsertColumn(g_guiList, 1, &idColumn);
 
-        guiControl(hwnd, L"STATIC", L"速率（poke/s）", SS_LEFT, 500, 12, 230, 20, 0);
-        g_guiRate = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL, 500, 34, 230, 24, kGuiRate);
-        guiControl(hwnd, L"STATIC", L"总次数", SS_LEFT, 500, 68, 230, 20, 0);
-        g_guiCount = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL, 500, 90, 230, 24, kGuiCount);
-        guiControl(hwnd, L"STATIC", L"消息", SS_LEFT, 500, 124, 230, 20, 0);
+        guiControl(hwnd, L"BUTTON", L"\u5237\u65b0", BS_PUSHBUTTON, 16, 515, 90, 30, kGuiRefresh);
+        guiControl(hwnd, L"BUTTON", L"\u5168\u9009", BS_PUSHBUTTON, 116, 515, 90, 30, kGuiSelectAll);
+        guiControl(hwnd, L"BUTTON", L"\u6e05\u7a7a", BS_PUSHBUTTON, 216, 515, 90, 30, kGuiSelectNone);
+        guiControl(hwnd, L"STATIC", L"\u52fe\u9009\u76ee\u6807\u540e\u5f00\u59cb\u53d1\u9001", SS_LEFT, 320, 520, 225, 20, 0);
+
+        guiControl(hwnd, L"BUTTON", L"\u53d1\u9001\u8bbe\u7f6e", BS_GROUPBOX, 570, 75, 330, 270, 0);
+        guiControl(hwnd, L"STATIC", L"\u53d1\u9001\u901f\u7387 (poke/s)", SS_LEFT, 590, 112, 140, 20, 0);
+        g_guiRate = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL, 735, 108, 140, 24, kGuiRate);
+        guiControl(hwnd, L"STATIC", L"\u603b\u6b21\u6570", SS_LEFT, 590, 150, 140, 20, 0);
+        g_guiCount = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER, 735, 146, 140, 24, kGuiCount);
+        guiControl(hwnd, L"STATIC", L"\u6d88\u606f", SS_LEFT, 590, 188, 140, 20, 0);
         g_guiMessage = guiControl(hwnd, L"EDIT", L"", WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL,
-                                  500, 146, 230, 70, kGuiMessage);
-        guiControl(hwnd, L"BUTTON", L"刷新客户端", BS_PUSHBUTTON, 500, 232, 110, 30, kGuiRefresh);
-        guiControl(hwnd, L"BUTTON", L"开始", BS_DEFPUSHBUTTON, 620, 232, 110, 30, kGuiStart);
-        guiControl(hwnd, L"BUTTON", L"停止", BS_PUSHBUTTON, 500, 270, 110, 30, kGuiStop);
-        guiControl(hwnd, L"STATIC", L"状态", SS_LEFT, 500, 322, 230, 20, 0);
-        g_guiStatus = guiControl(hwnd, L"STATIC", L"", SS_LEFT | SS_EDITCONTROL, 500, 344, 230, 90, kGuiStatus);
+                                  590, 212, 285, 70, kGuiMessage);
+        guiControl(hwnd, L"BUTTON", L"\u5f00\u59cb", BS_DEFPUSHBUTTON, 590, 302, 135, 30, kGuiStart);
+        guiControl(hwnd, L"BUTTON", L"\u505c\u6b62", BS_PUSHBUTTON, 740, 302, 135, 30, kGuiStop);
+
+        guiControl(hwnd, L"BUTTON", L"\u72b6\u6001", BS_GROUPBOX, 570, 365, 330, 135, 0);
+        g_guiStatus = guiControl(hwnd, L"STATIC", L"", SS_LEFT | SS_EDITCONTROL, 590, 402, 285, 75, kGuiStatus);
 
         double rate;
         std::uint64_t count;
@@ -485,9 +532,11 @@ static LRESULT CALLBACK guiProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
             count = g_config.total;
             messageText = g_config.message;
         }
-        SetWindowTextW(g_guiRate, guiW(std::to_string(rate)).c_str());
-        SetWindowTextW(g_guiCount, guiW(std::to_string(count)).c_str());
-        SetWindowTextW(g_guiMessage, guiW(messageText).c_str());
+        guiSetText(g_guiRate, guiW(std::to_string(rate)));
+        guiSetText(g_guiCount, guiW(std::to_string(count)));
+        guiSetText(g_guiMessage, guiW(messageText));
+        SendMessageW(g_guiMessage, EM_SETLIMITTEXT, 1024, 0);
+        guiUpdateServerLabel();
         guiRefresh();
         SetTimer(hwnd, 1, 250, nullptr);
         return 0;
@@ -498,6 +547,8 @@ static LRESULT CALLBACK guiProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
     case WM_COMMAND:
         if (HIWORD(wParam) == BN_CLICKED) {
             if (LOWORD(wParam) == kGuiRefresh) guiRefresh();
+            else if (LOWORD(wParam) == kGuiSelectAll) guiSelectAll(true);
+            else if (LOWORD(wParam) == kGuiSelectNone) guiSelectAll(false);
             else if (LOWORD(wParam) == kGuiStart) guiStart();
             else if (LOWORD(wParam) == kGuiStop) { g_controller.stop(); guiStatus(); }
             return 0;
@@ -523,6 +574,7 @@ static LRESULT CALLBACK guiProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
         g_guiCount = nullptr;
         g_guiMessage = nullptr;
         g_guiStatus = nullptr;
+        g_guiServer = nullptr;
         return 0;
     default:
         break;
@@ -534,6 +586,7 @@ static void showGui(uint64 schid) {
     if (g_guiWindow != nullptr && IsWindow(g_guiWindow) != FALSE) {
         ShowWindow(g_guiWindow, SW_SHOWNORMAL);
         SetForegroundWindow(g_guiWindow);
+        guiUpdateServerLabel();
         guiRefresh();
         return;
     }
@@ -551,18 +604,21 @@ static void showGui(uint64 schid) {
     klass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     klass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     if (GetClassInfoExW(instance, className, &klass) == FALSE) RegisterClassExW(&klass);
-    g_guiWindow = CreateWindowExW(WS_EX_TOOLWINDOW, className, L"PokeWave",
+    g_guiWindow = CreateWindowExW(WS_EX_APPWINDOW, className, L"PokeWave",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 760, 500, nullptr, nullptr, instance, nullptr);
-    if (g_guiWindow == nullptr) logLine(g_guiSchid, LogLevel_ERROR, "Unable to create the PokeWave GUI window.");
-    else { ShowWindow(g_guiWindow, SW_SHOWNORMAL); UpdateWindow(g_guiWindow); }
+        CW_USEDEFAULT, CW_USEDEFAULT, 920, 600, nullptr, nullptr, instance, nullptr);
+    if (g_guiWindow == nullptr) {
+        logLine(g_guiSchid, LogLevel_ERROR, "Unable to create the PokeWave GUI window.");
+    } else {
+        ShowWindow(g_guiWindow, SW_SHOWNORMAL);
+        UpdateWindow(g_guiWindow);
+        SetForegroundWindow(g_guiWindow);
+    }
 }
 #endif
-}
 
-extern "C" {
 const char* ts3plugin_name() { return "PokeWave"; }
-const char* ts3plugin_version() { return "0.3.1"; }
+const char* ts3plugin_version() { return "0.3.2"; }
 int ts3plugin_apiVersion() { return kApiVersion; }
 const char* ts3plugin_author() { return "Local server administrator"; }
 const char* ts3plugin_description() { return "Controlled multi-target TeamSpeak poke test tool."; }
@@ -575,20 +631,8 @@ void ts3plugin_shutdown() {
 #endif
     g_pluginId.clear();
 }
-int ts3plugin_offersConfigure() {
-#ifdef _WIN32
-    return PLUGIN_OFFERS_CONFIGURE_QT_THREAD;
-#else
-    return PLUGIN_OFFERS_NO_CONFIGURE;
-#endif
-}
-void ts3plugin_configure(void*, void*) {
-#ifdef _WIN32
-    showGui(currentSchid());
-#else
-    logLine(currentSchid(), LogLevel_INFO, "Use /pokewave help.");
-#endif
-}
+int ts3plugin_offersConfigure() { return PLUGIN_OFFERS_NO_CONFIGURE; }
+void ts3plugin_configure(void*, void*) {}
 void ts3plugin_registerPluginID(const char* id) { g_pluginId = id == nullptr ? "" : id; }
 const char* ts3plugin_commandKeyword() { return "pokewave"; }
 int ts3plugin_requestAutoload() { return 1; }
@@ -641,17 +685,17 @@ int ts3plugin_processCommand(uint64 serverConnectionHandlerID, const char* comma
     if (verb.empty() || verb == "help") { help(schid); return 0; }
     if (verb == "list") {
         std::string error; const auto clients = visibleClients(schid, &error);
-        if (!error.empty()) logLine(schid, LogLevel_ERROR, "list failed: " + error);
+        if (!error.empty()) commandReply(schid, LogLevel_ERROR, "list failed: " + error);
         else {
-            for (const auto& target : clients) logLine(schid, LogLevel_INFO, label(target));
-            logLine(schid, LogLevel_INFO, "Visible clients: " + std::to_string(clients.size()));
+            for (const auto& target : clients) commandReply(schid, LogLevel_INFO, label(target));
+            commandReply(schid, LogLevel_INFO, "Visible clients: " + std::to_string(clients.size()));
         }
         return 0;
     }
     if (verb == "select" || verb == "add" || verb == "remove") {
         std::string rest; std::getline(input, rest);
         const auto ids = parseIds(rest);
-        if (ids.empty()) { logLine(schid, LogLevel_WARNING, "No valid client ID."); return 0; }
+        if (ids.empty()) { commandReply(schid, LogLevel_WARNING, "No valid client ID."); return 0; }
         std::lock_guard<std::mutex> lock(g_configMutex);
         if (verb == "select") g_config.selected.clear();
         for (const anyID id : ids) {
@@ -662,7 +706,7 @@ int ts3plugin_processCommand(uint64 serverConnectionHandlerID, const char* comma
                 g_config.selected.push_back(id);
             }
         }
-        logLine(schid, LogLevel_INFO, "Selected targets: " + std::to_string(g_config.selected.size()));
+        commandReply(schid, LogLevel_INFO, "Selected targets: " + std::to_string(g_config.selected.size()));
         return 0;
     }
     if (verb == "speed") {
@@ -671,8 +715,8 @@ int ts3plugin_processCommand(uint64 serverConnectionHandlerID, const char* comma
             std::size_t end = 0; const double rate = std::stod(value, &end);
             if (end != value.size() || !validRate(rate)) throw std::invalid_argument("range");
             std::lock_guard<std::mutex> lock(g_configMutex); g_config.rate = rate;
-            logLine(schid, LogLevel_INFO, "Speed set to " + value + " poke/s.");
-        } catch (...) { logLine(schid, LogLevel_WARNING, "Speed must be a positive finite number."); }
+            commandReply(schid, LogLevel_INFO, "Speed set to " + value + " poke/s.");
+        } catch (...) { commandReply(schid, LogLevel_WARNING, "Speed must be a positive finite number."); }
         return 0;
     }
     if (verb == "count") {
@@ -681,14 +725,14 @@ int ts3plugin_processCommand(uint64 serverConnectionHandlerID, const char* comma
             std::size_t end = 0; const unsigned long long total = std::stoull(value, &end, 10);
             if (end != value.size() || total == 0) throw std::invalid_argument("range");
             std::lock_guard<std::mutex> lock(g_configMutex); g_config.total = static_cast<std::uint64_t>(total);
-            logLine(schid, LogLevel_INFO, "Count set to " + value + ".");
-        } catch (...) { logLine(schid, LogLevel_WARNING, "Count must be a positive uint64 integer."); }
+            commandReply(schid, LogLevel_INFO, "Count set to " + value + ".");
+        } catch (...) { commandReply(schid, LogLevel_WARNING, "Count must be a positive uint64 integer."); }
         return 0;
     }
     if (verb == "message") {
         std::string message; std::getline(input, message); message = leftTrim(message);
-        if (!validMessage(message)) logLine(schid, LogLevel_WARNING, "Message must be non-empty and at most 256 UTF-8 bytes.");
-        else { std::lock_guard<std::mutex> lock(g_configMutex); g_config.message = message; logLine(schid, LogLevel_INFO, "Poke message updated."); }
+        if (!validMessage(message)) commandReply(schid, LogLevel_WARNING, "Message must be non-empty and at most 256 UTF-8 bytes.");
+        else { std::lock_guard<std::mutex> lock(g_configMutex); g_config.message = message; commandReply(schid, LogLevel_INFO, "Poke message updated."); }
         return 0;
     }
     if (verb == "start") {
@@ -696,12 +740,12 @@ int ts3plugin_processCommand(uint64 serverConnectionHandlerID, const char* comma
         { std::lock_guard<std::mutex> lock(g_configMutex); rate = g_config.rate; total = g_config.total; message = g_config.message; }
         std::string error;
         if (g_controller.start(schid, configuredTargets(), rate, total, std::move(message), &error))
-            logLine(schid, LogLevel_INFO, "PokeWave start accepted.");
-        else logLine(schid, LogLevel_WARNING, "Start failed: " + error);
+            commandReply(schid, LogLevel_INFO, "PokeWave start accepted.");
+        else commandReply(schid, LogLevel_WARNING, "Start failed: " + error);
         return 0;
     }
-    if (verb == "stop") { g_controller.stop(); logLine(schid, LogLevel_INFO, "PokeWave stop requested."); return 0; }
-    if (verb == "status") { logLine(schid, LogLevel_INFO, statusText()); return 0; }
-    help(schid); return 0;
+    if (verb == "stop") { g_controller.stop(); commandReply(schid, LogLevel_INFO, "PokeWave stop requested."); return 0; }
+    if (verb == "status") { commandReply(schid, LogLevel_INFO, statusText()); return 0; }
+    commandReply(schid, LogLevel_WARNING, "Unknown command: " + verb + ". Use /pokewave help."); return 0;
 }
 }
