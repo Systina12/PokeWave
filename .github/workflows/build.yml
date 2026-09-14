@@ -58,3 +58,68 @@ jobs:
         with:
           name: PokeWave-windows-x64
           path: PokeWave-windows-x64.zip
+
+
+  runtime-smoke:
+    needs: windows-build
+    runs-on: windows-2022
+    steps:
+      - name: Download Windows plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: PokeWave-windows-x64
+          path: package
+      - name: Extract plugin package
+        shell: pwsh
+        run: Expand-Archive -Path "package\PokeWave-windows-x64.zip" -DestinationPath package\extracted -Force
+      - name: Download TeamSpeak 3 client
+        shell: pwsh
+        run: |
+          $url = "https://files.teamspeak-services.com/releases/client/3.6.2/TeamSpeak3-Client-win64-3.6.2.exe"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\TeamSpeak3-Client-win64-3.6.2.exe"
+          $size = (Get-Item "$env:RUNNER_TEMP\TeamSpeak3-Client-win64-3.6.2.exe").Length
+          if ($size -lt 50000000) { throw "TeamSpeak installer download is unexpectedly small: $size bytes" }
+      - name: Install TeamSpeak 3 client
+        shell: pwsh
+        run: |
+          $installer = "$env:RUNNER_TEMP\TeamSpeak3-Client-win64-3.6.2.exe"
+          $process = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
+          Write-Host "Installer exit code: $($process.ExitCode)"
+          $roots = @(
+            "$env:ProgramFiles\TeamSpeak 3 Client",
+            "\${env:ProgramFiles(x86)}\TeamSpeak 3 Client",
+            "$env:LOCALAPPDATA\TeamSpeak 3 Client",
+            "$env:RUNNER_TEMP"
+          )
+          $client = $null
+          foreach ($root in $roots) {
+            if (Test-Path $root) {
+              $client = Get-ChildItem -Path $root -Filter "ts3client_win64.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($null -ne $client) { break }
+            }
+          }
+          if ($null -eq $client) { throw "TeamSpeak 3 client executable was not found after installation" }
+          "TS3CLIENT_EXE=$($client.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
+          Write-Host "Using TeamSpeak client: $($client.FullName)"
+      - name: Load plugin in TeamSpeak client
+        shell: pwsh
+        run: |
+          $pluginDir = Join-Path $env:APPDATA "TS3Client\plugins"
+          New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
+          Copy-Item "package\extracted\pokewave.dll" (Join-Path $pluginDir "pokewave.dll") -Force
+          $client = Start-Process -FilePath $env:TS3CLIENT_EXE -ArgumentList "-nosingleinstance" -PassThru
+          Start-Sleep -Seconds 12
+          $client.Refresh()
+          if ($client.HasExited) { throw "TeamSpeak client exited during plugin smoke test with code $($client.ExitCode)" }
+          $loaded = $false
+          try {
+            $loaded = @($client.Modules | Where-Object { $_.ModuleName -ieq "pokewave.dll" }).Count -gt 0
+          } catch {
+            Write-Host "Process module enumeration failed: $($_.Exception.Message)"
+          }
+          if (!$loaded) {
+            $loaded = @((Get-Process -Id $client.Id).Modules | Where-Object { $_.ModuleName -ieq "pokewave.dll" }).Count -gt 0
+          }
+          if (!$loaded) { throw "TeamSpeak started, but pokewave.dll was not observed in its loaded modules" }
+          Write-Host "PokeWave DLL was loaded by TeamSpeak 3."
+          Stop-Process -Id $client.Id -Force
