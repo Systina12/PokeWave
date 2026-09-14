@@ -1,4 +1,5 @@
 #include "plugin_api.h"
+#include "teamspeak/public_errors.h"
 
 #include <cstring>
 #include <iostream>
