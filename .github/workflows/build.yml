@@ -16,9 +16,11 @@ jobs:
       - name: Fetch TeamSpeak plugin SDK
         run: git clone --depth=1 https://github.com/teamspeak/ts3client-pluginsdk.git /tmp/ts3client-pluginsdk
       - name: Configure
-        run: cmake -S . -B build -DTS3_SDK_DIR=/tmp/ts3client-pluginsdk
+        run: cmake -S . -B build -DTS3_SDK_DIR=/tmp/ts3client-pluginsdk -DBUILD_TESTING=ON
       - name: Build
         run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
       - name: Package Linux plugin
         run: tar -czf PokeWave-linux-x64.tar.gz -C build pokewave.so
       - name: Upload Linux artifact
@@ -36,9 +38,11 @@ jobs:
         run: git clone --depth=1 https://github.com/teamspeak/ts3client-pluginsdk.git "$env:RUNNER_TEMP\ts3client-pluginsdk"
       - name: Configure
         shell: pwsh
-        run: cmake -S . -B build -A x64 "-DTS3_SDK_DIR=$env:RUNNER_TEMP\ts3client-pluginsdk"
+        run: cmake -S . -B build -A x64 "-DTS3_SDK_DIR=$env:RUNNER_TEMP\ts3client-pluginsdk" -DBUILD_TESTING=ON
       - name: Build
         run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
       - name: Verify Windows plugin binary
         shell: pwsh
         run: |
@@ -111,6 +115,8 @@ jobs:
               [DllImport("user32.dll")]
               public static extern bool DestroyWindow(IntPtr window);
               [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+              public delegate int OffersConfigureDelegate();
+              [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
               public delegate IntPtr KeywordDelegate();
               [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
               public delegate int ProcessCommandDelegate(ulong schid, [MarshalAs(UnmanagedType.LPStr)] string command);
@@ -128,6 +134,8 @@ jobs:
           $dll = (Resolve-Path "package\extracted\pokewave.dll").Path
           $module = [PokeWaveNative]::LoadLibrary($dll)
           if ($module -eq [IntPtr]::Zero) { throw "LoadLibrary failed for pokewave.dll" }
+          $offers = Get-PokeDelegate $module "ts3plugin_offersConfigure" ([PokeWaveNative+OffersConfigureDelegate])
+          if ($offers.Invoke() -ne 0) { throw "PokeWave unexpectedly offers a Settings configure page" }
           $keyword = Get-PokeDelegate $module "ts3plugin_commandKeyword" ([PokeWaveNative+KeywordDelegate])
           $keywordText = [Runtime.InteropServices.Marshal]::PtrToStringAnsi($keyword.Invoke())
           if ($keywordText -ne "pokewave") { throw "Unexpected command keyword: $keywordText" }
@@ -191,8 +199,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.3.1
-          name: PokeWave v0.3.1
+          tag_name: v0.3.2
+          name: PokeWave v0.3.2
           target_commitish: main
           generate_release_notes: true
           files: |
