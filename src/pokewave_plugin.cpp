@@ -149,6 +149,8 @@ public:
         return true;
     }
 
+    bool running() const { return running_.load(); }
+
     void stop() {
         std::thread worker;
         {
